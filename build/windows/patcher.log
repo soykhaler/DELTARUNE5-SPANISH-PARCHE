@@ -1,0 +1,12 @@
+DELTARUNE Chapter 5 ES patcher
+data.win:
+S:\DELTARUNE\chapter5_windows\data.win
+payload: embebido en el ejecutable
+
+SHA256 entrada: 9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e
+Creando backup: S:\DELTARUNE\chapter5_windows\data.win.original
+Reconstruyendo STRG y offsets internos...
+SHA256 salida: a24ed35ab060053d3363aa67c0afe1915d7ef0c61b219eb74d1a158d2206fb36
+
+Parche aplicado correctamente.
+Backup: S:\DELTARUNE\chapter5_windows\data.win.original

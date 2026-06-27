@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#Author: soykhaler
+#deltarune-es-patcher.exe
+#Rating=1-5
+export PW_WINE_USE="PROTON_LG_10-28"
+export PW_PREFIX_NAME="DEFAULT"
+export PORTPROTON_NAME="deltarune-es-patcher"
+export FILE_DESCRIPTION=""
+export FILE_SHA256SUM="3bb78873d395266184bce7ff9f9e7c25f81f1c16bcb47d04be36667d983b13fd"
+export PW_VULKAN_USE="6"
