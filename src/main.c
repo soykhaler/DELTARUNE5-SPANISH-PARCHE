@@ -30,7 +30,8 @@
 #define PATH_LIMIT 4096
 #define MAX_SEARCH_DEPTH 5
 #define STRG_ALIGN 128
-#define KNOWN_INPUT_SHA256 "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
+#define KNOWN_INPUT_SHA256_OLD "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
+#define KNOWN_INPUT_SHA256_NEW "cd940118eff1a3f24dd8dca3932901f85bfc83761e175e36736622316e7ed556"
 
 typedef struct Sha256 {
     uint8_t data[64];
@@ -49,6 +50,17 @@ typedef struct StringPatchSet {
     uint32_t count;
     StringPatch *items;
 } StringPatchSet;
+
+typedef struct DwordPatchProfile {
+    const char *name;
+    size_t strg_offset;
+    uint32_t string_count;
+    uint32_t strg_size;
+    const uint8_t *strings_blob;
+    size_t strings_blob_len;
+    const uint8_t *blob;
+    size_t blob_len;
+} DwordPatchProfile;
 
 typedef struct PatchJob {
     volatile int running;
@@ -586,57 +598,28 @@ static int find_chunk(const uint8_t *data, size_t len, const char name[4], size_
     return 0;
 }
 
-static int map_pointer_value(const uint8_t *old_file, size_t old_file_len, const uint8_t *patched, size_t patched_len,
-                             size_t strg_offset, uint32_t string_count, size_t old_tail, size_t new_tail,
-                             uint32_t value, uint32_t *mapped) {
-    size_t table_start = strg_offset + 12u;
-    if (table_start + (size_t)string_count * 4u <= old_file_len) {
-        uint32_t lo = 0;
-        uint32_t hi = string_count;
-        while (lo < hi) {
-            uint32_t mid = lo + (hi - lo) / 2u;
-            uint32_t off = read_u32le(old_file + table_start + (size_t)mid * 4u);
-            if (off <= value) lo = mid + 1u;
-            else hi = mid;
-        }
+static const DwordPatchProfile *find_dword_profile(size_t strg_offset, uint32_t string_count, uint32_t strg_size) {
+    static const DwordPatchProfile profiles[] = {
+        {"2025-06-25", 0x014e8cf0u, 93214u, 0x0041ee08u, embedded_strings_old_bin, sizeof(embedded_strings_old_bin), embedded_dwords_old_bin, sizeof(embedded_dwords_old_bin)},
+        {"2026-06-27", 0x014e9330u, 93223u, 0x0041ef48u, embedded_strings_new_bin, sizeof(embedded_strings_new_bin), embedded_dwords_new_bin, sizeof(embedded_dwords_new_bin)},
+    };
 
-        if (lo > 0) {
-            uint32_t idx = lo - 1u;
-            uint32_t old_off = read_u32le(old_file + table_start + (size_t)idx * 4u);
-            if ((size_t)old_off + 4u <= old_file_len && strg_offset + 12u + (size_t)idx * 4u + 4u <= patched_len) {
-                uint32_t old_len = read_u32le(old_file + old_off);
-                size_t old_entry_size = (4u + (size_t)old_len + 1u + 3u) & ~(size_t)3u;
-                if ((size_t)value >= (size_t)old_off && (size_t)value < (size_t)old_off + old_entry_size) {
-                    uint32_t new_off = read_u32le(patched + table_start + (size_t)idx * 4u);
-                    uint64_t new_value = (uint64_t)new_off + ((uint64_t)value - (uint64_t)old_off);
-                    if (new_value <= UINT32_MAX) {
-                        *mapped = (uint32_t)new_value;
-                        return 1;
-                    }
-                }
-            }
+    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i) {
+        if (profiles[i].strg_offset == strg_offset &&
+            profiles[i].string_count == string_count &&
+            profiles[i].strg_size == strg_size) {
+            return &profiles[i];
         }
     }
-
-    if ((size_t)value >= old_tail && (size_t)value < old_file_len) {
-        int64_t delta = (int64_t)new_tail - (int64_t)old_tail;
-        int64_t new_value = (int64_t)value + delta;
-        if (new_value >= 0 && new_value <= UINT32_MAX && (size_t)new_value < patched_len) {
-            *mapped = (uint32_t)new_value;
-            return 1;
-        }
-    }
-
-    return 0;
+    return NULL;
 }
 
-static int apply_dword_patches_from_memory(const uint8_t *blob, size_t blob_len,
-                                           const uint8_t *old_file, size_t old_file_len,
+static int apply_dword_patches_from_memory(const DwordPatchProfile *profile,
                                            uint8_t *patched, size_t patched_len,
-                                           size_t strg_offset, uint32_t string_count,
-                                           uint32_t old_strg_size, uint32_t new_strg_size,
                                            uint32_t *applied, uint32_t *skipped,
                                            char *err, size_t err_size) {
+    const uint8_t *blob = profile->blob;
+    size_t blob_len = profile->blob_len;
     if (blob_len < 12 || memcmp(blob, "DRDP", 4) != 0 || read_u32le(blob + 4) != 1) {
         snprintf(err, err_size, "Tabla de punteros invalida");
         return 0;
@@ -647,8 +630,6 @@ static int apply_dword_patches_from_memory(const uint8_t *blob, size_t blob_len,
         return 0;
     }
 
-    size_t old_tail = strg_offset + 8u + (size_t)old_strg_size;
-    size_t new_tail = strg_offset + 8u + (size_t)new_strg_size;
     *applied = 0;
     *skipped = 0;
 
@@ -665,13 +646,8 @@ static int apply_dword_patches_from_memory(const uint8_t *blob, size_t blob_len,
         }
 
         uint32_t current = read_u32le(patched + patch_pos);
-        uint32_t mapped = 0;
         if (current == old_value) {
             write_u32le(patched + patch_pos, new_value);
-            (*applied)++;
-        } else if (map_pointer_value(old_file, old_file_len, patched, patched_len, strg_offset, string_count,
-                                     old_tail, new_tail, current, &mapped)) {
-            write_u32le(patched + patch_pos, mapped);
             (*applied)++;
         } else {
             (*skipped)++;
@@ -684,6 +660,7 @@ static int apply_dword_patches_from_memory(const uint8_t *blob, size_t blob_len,
 static int build_patched_data(const char *data_path,
                               uint8_t **out_data, size_t *out_len, char output_hash[65],
                               uint32_t *dwords_applied, uint32_t *dwords_skipped,
+                              const char **profile_name,
                               char *err, size_t err_size) {
     uint8_t *file = NULL;
     size_t file_len = 0;
@@ -705,13 +682,21 @@ static int build_patched_data(const char *data_path,
         return 0;
     }
 
+    uint32_t string_count = read_u32le(file + strg_offset + 8);
+    const DwordPatchProfile *profile = find_dword_profile(strg_offset, string_count, old_strg_size);
+    if (!profile) {
+        free(file);
+        snprintf(err, err_size, "Build de data.win no soportada todavia; no aplico punteros a ciegas");
+        return 0;
+    }
+    *profile_name = profile->name;
+
     StringPatchSet patches = {0};
-    if (!load_string_patches_from_memory(embedded_strings_bin, embedded_strings_bin_len, &patches, err, err_size)) {
+    if (!load_string_patches_from_memory(profile->strings_blob, profile->strings_blob_len, &patches, err, err_size)) {
         free(file);
         return 0;
     }
 
-    uint32_t string_count = read_u32le(file + strg_offset + 8);
     size_t table_len = 4u + (size_t)string_count * 4u;
     if (strg_offset + 8u + table_len > file_len) {
         free_string_patches(&patches);
@@ -836,10 +821,14 @@ static int build_patched_data(const char *data_path,
     free(replacement_len);
     free_string_patches(&patches);
 
-    if (!apply_dword_patches_from_memory(embedded_dwords_bin, embedded_dwords_bin_len,
-                                         file, file_len, patched, new_file_len,
-                                         strg_offset, string_count, old_strg_size, (uint32_t)new_content_len,
+    if (!apply_dword_patches_from_memory(profile, patched, new_file_len,
                                          dwords_applied, dwords_skipped, err, err_size)) {
+        free(file);
+        free(patched);
+        return 0;
+    }
+    if (*dwords_skipped != 0) {
+        snprintf(err, err_size, "La build coincide con %s, pero %u punteros no cuadran", profile->name, *dwords_skipped);
         free(file);
         free(patched);
         return 0;
@@ -885,9 +874,8 @@ static int patch_job_run(PatchJob *job) {
         append_log(job->log_path, "No se pudo calcular SHA256; continuo igualmente.\n");
     } else {
         append_log(job->log_path, "SHA256 entrada: %s\n", hash);
-        if (strcmp(hash, KNOWN_INPUT_SHA256) != 0) {
-            append_log(job->log_path, "Aviso: data.win no coincide con la build original probada.\n");
-            append_log(job->log_path, "Intentare parchearlo igualmente.\n");
+        if (strcmp(hash, KNOWN_INPUT_SHA256_OLD) != 0 && strcmp(hash, KNOWN_INPUT_SHA256_NEW) != 0) {
+            append_log(job->log_path, "Aviso: hash no reconocido; intentare parchear solo si el layout esta soportado.\n");
         }
     }
 
@@ -916,10 +904,11 @@ static int patch_job_run(PatchJob *job) {
     char output_hash[65];
     uint32_t dwords_applied = 0;
     uint32_t dwords_skipped = 0;
+    const char *profile_name = "";
     char err[256];
     err[0] = '\0';
     if (!build_patched_data(job->data_win, &patched, &patched_len, output_hash,
-                            &dwords_applied, &dwords_skipped, err, sizeof(err))) {
+                            &dwords_applied, &dwords_skipped, &profile_name, err, sizeof(err))) {
         append_log(job->log_path, "%s\n", err[0] ? err : "No se pudo aplicar el parche.");
         remove(tmp_out);
         return 0;
@@ -942,6 +931,7 @@ static int patch_job_run(PatchJob *job) {
     }
 
     set_job_status(job, "Parche aplicado");
+    append_log(job->log_path, "Perfil de offsets: %s\n", profile_name);
     append_log(job->log_path, "Punteros actualizados: %u", dwords_applied);
     if (dwords_skipped > 0) append_log(job->log_path, " (%u omitidos por cambios en la build)", dwords_skipped);
     append_log(job->log_path, "\n");

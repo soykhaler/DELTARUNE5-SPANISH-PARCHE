@@ -1,0 +1,9 @@
+data.win
+data.win.*
+*.win
+*.unx
+*.ios
+*.droid
+*.yydebug
+patcher.log
+*.log

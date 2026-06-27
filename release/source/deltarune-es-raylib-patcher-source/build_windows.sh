@@ -10,14 +10,16 @@ if ! command -v "$CROSS_CC" >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ ! -f /usr/x86_64-w64-mingw32/include/raylib.h ]; then
-  echo "No encuentro raylib para Windows en /usr/x86_64-w64-mingw32." >&2
-  echo "Instala/copiala ahi o compila este proyecto desde Windows con raylib instalado." >&2
+RAYLIB_WIN_DIR="${RAYLIB_WIN_DIR:-$ROOT/third_party/raylib-5.5_win64_mingw-w64/raylib-5.5_win64_mingw-w64}"
+if [ ! -f "$RAYLIB_WIN_DIR/include/raylib.h" ] || [ ! -f "$RAYLIB_WIN_DIR/lib/libraylib.a" ]; then
+  echo "No encuentro raylib Windows en: $RAYLIB_WIN_DIR" >&2
+  echo "Descarga raylib-5.5_win64_mingw-w64.zip y descomprimelo en third_party/." >&2
   exit 1
 fi
 
-"$CROSS_CC" -std=c99 -O2 -Wall -Wextra "$ROOT/src/main.c" -o "$ROOT/build/windows/deltarune-es-patcher.exe" \
-  -I/usr/x86_64-w64-mingw32/include -L/usr/x86_64-w64-mingw32/lib \
-  -lraylib -lopengl32 -lgdi32 -lwinmm -lshell32
+"$CROSS_CC" -std=c99 -O2 -Wall -Wextra -mwindows -static -static-libgcc \
+  "$ROOT/src/main.c" -o "$ROOT/build/windows/deltarune-es-patcher.exe" \
+  -I"$RAYLIB_WIN_DIR/include" -L"$RAYLIB_WIN_DIR/lib" \
+  -lraylib -lopengl32 -lgdi32 -lwinmm -lshell32 -lole32 -luuid -lcomdlg32
 
 echo "Build Windows: $ROOT/build/windows/deltarune-es-patcher.exe"

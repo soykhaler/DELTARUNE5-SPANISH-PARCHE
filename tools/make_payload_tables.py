@@ -17,7 +17,7 @@ def write_string_table(json_path: Path, out_path: Path) -> None:
         index = int(row["index"])
         text = row.get("translation")
         if text is None or text == "":
-            text = row.get("source", "")
+            continue
         translations[index] = text.encode("utf-8")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

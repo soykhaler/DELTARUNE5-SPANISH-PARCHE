@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "raylib.h"
+#include "embedded_assets.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -14,6 +15,8 @@
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#define NOUSER
 #include <windows.h>
 #else
 #include <dirent.h>
@@ -27,8 +30,8 @@
 #define PATH_LIMIT 4096
 #define MAX_SEARCH_DEPTH 5
 #define STRG_ALIGN 128
-#define EXPECTED_INPUT_SHA256 "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
-#define EXPECTED_OUTPUT_SHA256 "a24ed35ab060053d3363aa67c0afe1915d7ef0c61b219eb74d1a158d2206fb36"
+#define KNOWN_INPUT_SHA256_OLD "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
+#define KNOWN_INPUT_SHA256_NEW "cd940118eff1a3f24dd8dca3932901f85bfc83761e175e36736622316e7ed556"
 
 typedef struct Sha256 {
     uint8_t data[64];
@@ -48,13 +51,23 @@ typedef struct StringPatchSet {
     StringPatch *items;
 } StringPatchSet;
 
+typedef struct DwordPatchProfile {
+    const char *name;
+    size_t strg_offset;
+    uint32_t string_count;
+    uint32_t strg_size;
+    const uint8_t *strings_blob;
+    size_t strings_blob_len;
+    const uint8_t *blob;
+    size_t blob_len;
+} DwordPatchProfile;
+
 typedef struct PatchJob {
     volatile int running;
     volatile int done;
     volatile int success;
     char data_win[PATH_LIMIT];
     char app_dir[PATH_LIMIT];
-    char payload_dir[PATH_LIMIT];
     char log_path[PATH_LIMIT];
     char status[256];
 } PatchJob;
@@ -228,6 +241,54 @@ static int equals_ignore_case(const char *a, const char *b) {
     return *a == '\0' && *b == '\0';
 }
 
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static void normalize_input_path(const char *input, char *out, size_t out_size) {
+    while (*input == ' ' || *input == '\t' || *input == '\r' || *input == '\n') input++;
+
+    char temp[PATH_LIMIT];
+    snprintf(temp, sizeof(temp), "%s", input);
+    size_t len = strlen(temp);
+    while (len > 0 && (temp[len - 1] == ' ' || temp[len - 1] == '\t' || temp[len - 1] == '\r' || temp[len - 1] == '\n')) {
+        temp[--len] = '\0';
+    }
+    if (len >= 2 && ((temp[0] == '"' && temp[len - 1] == '"') || (temp[0] == '\'' && temp[len - 1] == '\''))) {
+        temp[len - 1] = '\0';
+        memmove(temp, temp + 1, len - 1);
+    }
+
+    const char *src = temp;
+    if (strncmp(src, "file://localhost/", 17) == 0) src += 16;
+    else if (strncmp(src, "file://", 7) == 0) src += 7;
+
+    char decoded[PATH_LIMIT];
+    size_t w = 0;
+    for (size_t r = 0; src[r] && w + 1 < sizeof(decoded); ++r) {
+        if (src[r] == '%' && isxdigit((unsigned char)src[r + 1]) && isxdigit((unsigned char)src[r + 2])) {
+            int hi = hex_digit_value(src[r + 1]);
+            int lo = hex_digit_value(src[r + 2]);
+            decoded[w++] = (char)((hi << 4) | lo);
+            r += 2;
+        } else {
+            decoded[w++] = src[r];
+        }
+    }
+    decoded[w] = '\0';
+
+#if defined(_WIN32)
+    if (decoded[0] == '/' && isalpha((unsigned char)decoded[1]) && decoded[2] == ':') {
+        memmove(decoded, decoded + 1, strlen(decoded));
+    }
+#endif
+
+    snprintf(out, out_size, "%s", decoded);
+}
+
 static void path_join(char *out, size_t out_size, const char *base, const char *child) {
     if (!base || !base[0]) {
         snprintf(out, out_size, "%s", child);
@@ -357,43 +418,16 @@ static int find_data_win_in_dir(const char *dir, int depth, char *out, size_t ou
 }
 
 static int resolve_data_win_path(const char *input, char *out, size_t out_size) {
-    if (file_exists(input)) {
-        snprintf(out, out_size, "%s", input);
+    char normalized[PATH_LIMIT];
+    normalize_input_path(input, normalized, sizeof(normalized));
+    if (file_exists(normalized)) {
+        snprintf(out, out_size, "%s", normalized);
         return 1;
     }
-    if (dir_exists(input)) {
-        return find_data_win_in_dir(input, MAX_SEARCH_DEPTH, out, out_size);
+    if (dir_exists(normalized)) {
+        return find_data_win_in_dir(normalized, MAX_SEARCH_DEPTH, out, out_size);
     }
     return 0;
-}
-
-static void find_payload_dir(char *out, size_t out_size, const char *app_dir) {
-    char candidate[PATH_LIMIT];
-    path_join(candidate, sizeof(candidate), app_dir, "payload");
-    if (dir_exists(candidate)) {
-        snprintf(out, out_size, "%s", candidate);
-        return;
-    }
-
-    char parent[PATH_LIMIT];
-    snprintf(parent, sizeof(parent), "%s", app_dir);
-    dirname_in_place(parent);
-    path_join(candidate, sizeof(candidate), parent, "payload");
-    if (dir_exists(candidate)) {
-        snprintf(out, out_size, "%s", candidate);
-        return;
-    }
-
-    char grandparent[PATH_LIMIT];
-    snprintf(grandparent, sizeof(grandparent), "%s", parent);
-    dirname_in_place(grandparent);
-    path_join(candidate, sizeof(candidate), grandparent, "payload");
-    if (dir_exists(candidate)) {
-        snprintf(out, out_size, "%s", candidate);
-        return;
-    }
-
-    snprintf(out, out_size, "payload");
 }
 
 static int read_file_alloc(const char *path, uint8_t **out_data, size_t *out_len) {
@@ -501,15 +535,8 @@ static void free_string_patches(StringPatchSet *set) {
     set->count = 0;
 }
 
-static int load_string_patches(const char *path, StringPatchSet *set, char *err, size_t err_size) {
-    uint8_t *blob = NULL;
-    size_t len = 0;
-    if (!read_file_alloc(path, &blob, &len)) {
-        snprintf(err, err_size, "No se pudo leer la tabla de textos");
-        return 0;
-    }
+static int load_string_patches_from_memory(const uint8_t *blob, size_t len, StringPatchSet *set, char *err, size_t err_size) {
     if (len < 12 || memcmp(blob, "DRSP", 4) != 0 || read_u32le(blob + 4) != 1) {
-        free(blob);
         snprintf(err, err_size, "Tabla de textos invalida");
         return 0;
     }
@@ -517,7 +544,6 @@ static int load_string_patches(const char *path, StringPatchSet *set, char *err,
     uint32_t count = read_u32le(blob + 8);
     StringPatch *items = (StringPatch *)calloc(count ? count : 1, sizeof(StringPatch));
     if (!items) {
-        free(blob);
         snprintf(err, err_size, "Sin memoria para la tabla de textos");
         return 0;
     }
@@ -525,7 +551,6 @@ static int load_string_patches(const char *path, StringPatchSet *set, char *err,
     size_t pos = 12;
     for (uint32_t i = 0; i < count; ++i) {
         if (pos + 8 > len) {
-            free(blob);
             free(items);
             snprintf(err, err_size, "Tabla de textos truncada");
             return 0;
@@ -534,7 +559,6 @@ static int load_string_patches(const char *path, StringPatchSet *set, char *err,
         uint32_t text_len = read_u32le(blob + pos + 4);
         pos += 8;
         if (pos + text_len > len) {
-            free(blob);
             free(items);
             snprintf(err, err_size, "Texto truncado en tabla");
             return 0;
@@ -543,7 +567,6 @@ static int load_string_patches(const char *path, StringPatchSet *set, char *err,
         items[i].len = text_len;
         items[i].text = (uint8_t *)malloc(text_len ? text_len : 1);
         if (!items[i].text) {
-            free(blob);
             for (uint32_t j = 0; j < i; ++j) free(items[j].text);
             free(items);
             snprintf(err, err_size, "Sin memoria para textos");
@@ -553,7 +576,6 @@ static int load_string_patches(const char *path, StringPatchSet *set, char *err,
         pos += text_len;
     }
 
-    free(blob);
     set->count = count;
     set->items = items;
     return 1;
@@ -576,24 +598,40 @@ static int find_chunk(const uint8_t *data, size_t len, const char name[4], size_
     return 0;
 }
 
-static int apply_dword_patches(const char *path, uint8_t *data, size_t len, char *err, size_t err_size) {
-    uint8_t *blob = NULL;
-    size_t blob_len = 0;
-    if (!read_file_alloc(path, &blob, &blob_len)) {
-        snprintf(err, err_size, "No se pudo leer la tabla de punteros");
-        return 0;
+static const DwordPatchProfile *find_dword_profile(size_t strg_offset, uint32_t string_count, uint32_t strg_size) {
+    static const DwordPatchProfile profiles[] = {
+        {"2025-06-25", 0x014e8cf0u, 93214u, 0x0041ee08u, embedded_strings_old_bin, sizeof(embedded_strings_old_bin), embedded_dwords_old_bin, sizeof(embedded_dwords_old_bin)},
+        {"2026-06-27", 0x014e9330u, 93223u, 0x0041ef48u, embedded_strings_new_bin, sizeof(embedded_strings_new_bin), embedded_dwords_new_bin, sizeof(embedded_dwords_new_bin)},
+    };
+
+    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i) {
+        if (profiles[i].strg_offset == strg_offset &&
+            profiles[i].string_count == string_count &&
+            profiles[i].strg_size == strg_size) {
+            return &profiles[i];
+        }
     }
+    return NULL;
+}
+
+static int apply_dword_patches_from_memory(const DwordPatchProfile *profile,
+                                           uint8_t *patched, size_t patched_len,
+                                           uint32_t *applied, uint32_t *skipped,
+                                           char *err, size_t err_size) {
+    const uint8_t *blob = profile->blob;
+    size_t blob_len = profile->blob_len;
     if (blob_len < 12 || memcmp(blob, "DRDP", 4) != 0 || read_u32le(blob + 4) != 1) {
-        free(blob);
         snprintf(err, err_size, "Tabla de punteros invalida");
         return 0;
     }
     uint32_t count = read_u32le(blob + 8);
     if (blob_len != 12u + (size_t)count * 12u) {
-        free(blob);
         snprintf(err, err_size, "Tabla de punteros truncada");
         return 0;
     }
+
+    *applied = 0;
+    *skipped = 0;
 
     size_t pos = 12;
     for (uint32_t i = 0; i < count; ++i) {
@@ -602,26 +640,28 @@ static int apply_dword_patches(const char *path, uint8_t *data, size_t len, char
         uint32_t new_value = read_u32le(blob + pos + 8);
         pos += 12;
 
-        if ((size_t)patch_pos + 4 > len) {
-            free(blob);
-            snprintf(err, err_size, "Puntero fuera de rango en 0x%08x", patch_pos);
-            return 0;
+        if ((size_t)patch_pos + 4 > patched_len) {
+            (*skipped)++;
+            continue;
         }
-        uint32_t current = read_u32le(data + patch_pos);
-        if (current != old_value) {
-            free(blob);
-            snprintf(err, err_size, "Puntero inesperado en 0x%08x", patch_pos);
-            return 0;
+
+        uint32_t current = read_u32le(patched + patch_pos);
+        if (current == old_value) {
+            write_u32le(patched + patch_pos, new_value);
+            (*applied)++;
+        } else {
+            (*skipped)++;
         }
-        write_u32le(data + patch_pos, new_value);
     }
 
-    free(blob);
     return 1;
 }
 
-static int build_patched_data(const char *data_path, const char *string_table, const char *dword_table,
-                              uint8_t **out_data, size_t *out_len, char *err, size_t err_size) {
+static int build_patched_data(const char *data_path,
+                              uint8_t **out_data, size_t *out_len, char output_hash[65],
+                              uint32_t *dwords_applied, uint32_t *dwords_skipped,
+                              const char **profile_name,
+                              char *err, size_t err_size) {
     uint8_t *file = NULL;
     size_t file_len = 0;
     if (!read_file_alloc(data_path, &file, &file_len)) {
@@ -642,13 +682,21 @@ static int build_patched_data(const char *data_path, const char *string_table, c
         return 0;
     }
 
+    uint32_t string_count = read_u32le(file + strg_offset + 8);
+    const DwordPatchProfile *profile = find_dword_profile(strg_offset, string_count, old_strg_size);
+    if (!profile) {
+        free(file);
+        snprintf(err, err_size, "Build de data.win no soportada todavia; no aplico punteros a ciegas");
+        return 0;
+    }
+    *profile_name = profile->name;
+
     StringPatchSet patches = {0};
-    if (!load_string_patches(string_table, &patches, err, err_size)) {
+    if (!load_string_patches_from_memory(profile->strings_blob, profile->strings_blob_len, &patches, err, err_size)) {
         free(file);
         return 0;
     }
 
-    uint32_t string_count = read_u32le(file + strg_offset + 8);
     size_t table_len = 4u + (size_t)string_count * 4u;
     if (strg_offset + 8u + table_len > file_len) {
         free_string_patches(&patches);
@@ -772,20 +820,22 @@ static int build_patched_data(const char *data_path, const char *string_table, c
     free(replacement);
     free(replacement_len);
     free_string_patches(&patches);
+
+    if (!apply_dword_patches_from_memory(profile, patched, new_file_len,
+                                         dwords_applied, dwords_skipped, err, err_size)) {
+        free(file);
+        free(patched);
+        return 0;
+    }
+    if (*dwords_skipped != 0) {
+        snprintf(err, err_size, "La build coincide con %s, pero %u punteros no cuadran", profile->name, *dwords_skipped);
+        free(file);
+        free(patched);
+        return 0;
+    }
+
     free(file);
-
-    if (!apply_dword_patches(dword_table, patched, new_file_len, err, err_size)) {
-        free(patched);
-        return 0;
-    }
-
-    char output_hash[65];
     sha256_buffer_hex(patched, new_file_len, output_hash);
-    if (strcmp(output_hash, EXPECTED_OUTPUT_SHA256) != 0) {
-        snprintf(err, err_size, "Hash de salida inesperado: %s", output_hash);
-        free(patched);
-        return 0;
-    }
 
     *out_data = patched;
     *out_len = new_file_len;
@@ -808,10 +858,10 @@ static int patch_job_run(PatchJob *job) {
     FILE *clear = fopen(job->log_path, "wb");
     if (clear) fclose(clear);
 
-    set_job_status(job, "Verificando data.win...");
+    set_job_status(job, "Leyendo data.win...");
     append_log(job->log_path, "DELTARUNE Chapter 5 ES patcher\n");
     append_log(job->log_path, "data.win:\n%s\n", job->data_win);
-    append_log(job->log_path, "payload: %s\n\n", job->payload_dir);
+    append_log(job->log_path, "payload: embebido en el ejecutable\n\n");
 
     if (!file_exists(job->data_win)) {
         append_log(job->log_path, "No existe el archivo seleccionado.\n");
@@ -819,32 +869,20 @@ static int patch_job_run(PatchJob *job) {
     }
 
     char hash[65];
+    hash[0] = '\0';
     if (!sha256_file_hex(job->data_win, hash)) {
-        append_log(job->log_path, "No se pudo calcular SHA256.\n");
-        return 0;
-    }
-    append_log(job->log_path, "SHA256 entrada: %s\n", hash);
-    if (strcmp(hash, EXPECTED_INPUT_SHA256) != 0) {
-        append_log(job->log_path, "Este data.win no coincide con la version verificada.\n");
-        append_log(job->log_path, "Usa el data.win original del Capitulo 5 sin modificar.\n");
-        return 0;
+        append_log(job->log_path, "No se pudo calcular SHA256; continuo igualmente.\n");
+    } else {
+        append_log(job->log_path, "SHA256 entrada: %s\n", hash);
+        if (strcmp(hash, KNOWN_INPUT_SHA256_OLD) != 0 && strcmp(hash, KNOWN_INPUT_SHA256_NEW) != 0) {
+            append_log(job->log_path, "Aviso: hash no reconocido; intentare parchear solo si el layout esta soportado.\n");
+        }
     }
 
-    char string_table[PATH_LIMIT], dword_table[PATH_LIMIT], backup[PATH_LIMIT], tmp_out[PATH_LIMIT];
-    path_join(string_table, sizeof(string_table), job->payload_dir, "tables/ch5_es_strings.bin");
-    path_join(dword_table, sizeof(dword_table), job->payload_dir, "tables/ch5_es_dword_patches.bin");
+    char backup[PATH_LIMIT], tmp_out[PATH_LIMIT];
     if (!path_with_suffix(backup, sizeof(backup), job->data_win, ".original") ||
         !path_with_suffix(tmp_out, sizeof(tmp_out), job->data_win, ".es.tmp")) {
         append_log(job->log_path, "La ruta de data.win es demasiado larga.\n");
-        return 0;
-    }
-
-    if (!file_exists(string_table)) {
-        append_log(job->log_path, "Falta la tabla de textos: %s\n", string_table);
-        return 0;
-    }
-    if (!file_exists(dword_table)) {
-        append_log(job->log_path, "Falta la tabla de punteros: %s\n", dword_table);
         return 0;
     }
 
@@ -863,9 +901,14 @@ static int patch_job_run(PatchJob *job) {
     append_log(job->log_path, "Reconstruyendo STRG y offsets internos...\n");
     uint8_t *patched = NULL;
     size_t patched_len = 0;
+    char output_hash[65];
+    uint32_t dwords_applied = 0;
+    uint32_t dwords_skipped = 0;
+    const char *profile_name = "";
     char err[256];
     err[0] = '\0';
-    if (!build_patched_data(job->data_win, string_table, dword_table, &patched, &patched_len, err, sizeof(err))) {
+    if (!build_patched_data(job->data_win, &patched, &patched_len, output_hash,
+                            &dwords_applied, &dwords_skipped, &profile_name, err, sizeof(err))) {
         append_log(job->log_path, "%s\n", err[0] ? err : "No se pudo aplicar el parche.");
         remove(tmp_out);
         return 0;
@@ -888,7 +931,11 @@ static int patch_job_run(PatchJob *job) {
     }
 
     set_job_status(job, "Parche aplicado");
-    append_log(job->log_path, "SHA256 salida: %s\n", EXPECTED_OUTPUT_SHA256);
+    append_log(job->log_path, "Perfil de offsets: %s\n", profile_name);
+    append_log(job->log_path, "Punteros actualizados: %u", dwords_applied);
+    if (dwords_skipped > 0) append_log(job->log_path, " (%u omitidos por cambios en la build)", dwords_skipped);
+    append_log(job->log_path, "\n");
+    append_log(job->log_path, "SHA256 salida: %s\n", output_hash);
     append_log(job->log_path, "\nParche aplicado correctamente.\n");
     append_log(job->log_path, "Backup: %s\n", backup);
     return 1;
@@ -953,27 +1000,6 @@ static void read_log_tail(const char *path, char *out, size_t out_size) {
         char *first_newline = strchr(out, '\n');
         if (first_newline) memmove(out, first_newline + 1, strlen(first_newline + 1) + 1);
     }
-}
-
-static const char *find_asset(const char *app_dir, const char *name, char *out, size_t out_size) {
-    char candidate[PATH_LIMIT];
-    char asset_name[PATH_LIMIT];
-    path_join(asset_name, sizeof(asset_name), "assets", name);
-
-    path_join(candidate, sizeof(candidate), app_dir, asset_name);
-    if (file_exists(candidate)) {
-        snprintf(out, out_size, "%s", candidate);
-        return out;
-    }
-
-    path_join(candidate, sizeof(candidate), ".", asset_name);
-    if (file_exists(candidate)) {
-        snprintf(out, out_size, "%s", candidate);
-        return out;
-    }
-
-    out[0] = '\0';
-    return out;
 }
 
 static void abbreviate_path(const char *path, char *out, size_t out_size, size_t max_chars) {
@@ -1047,15 +1073,56 @@ static void select_input_path(const char *path) {
         snprintf(g_job.data_win, sizeof(g_job.data_win), "%s", resolved);
         set_job_status(&g_job, "Listo");
     } else {
+        g_job.data_win[0] = '\0';
         set_job_status(&g_job, "No encuentro data.win");
     }
+}
+
+static void get_current_dir(char *out, size_t out_size) {
+#if defined(_WIN32)
+    DWORD len = GetCurrentDirectoryA((DWORD)out_size, out);
+    if (len == 0 || len >= out_size) snprintf(out, out_size, ".");
+#else
+    if (!getcwd(out, out_size)) snprintf(out, out_size, ".");
+#endif
+}
+
+static int try_autolocate_data_win(void) {
+    if (g_job.data_win[0] && file_exists(g_job.data_win)) return 1;
+
+    char cwd[PATH_LIMIT];
+    get_current_dir(cwd, sizeof(cwd));
+    if (resolve_data_win_path(cwd, g_job.data_win, sizeof(g_job.data_win))) {
+        set_job_status(&g_job, "Listo");
+        return 1;
+    }
+    if (resolve_data_win_path(g_job.app_dir, g_job.data_win, sizeof(g_job.data_win))) {
+        set_job_status(&g_job, "Listo");
+        return 1;
+    }
+
+    char parent[PATH_LIMIT];
+    snprintf(parent, sizeof(parent), "%s", g_job.app_dir);
+    dirname_in_place(parent);
+    if (resolve_data_win_path(parent, g_job.data_win, sizeof(g_job.data_win))) {
+        set_job_status(&g_job, "Listo");
+        return 1;
+    }
+
+    set_job_status(&g_job, "Suelta carpeta o pon el exe junto al juego");
+    return 0;
+}
+
+static void start_patch_or_locate(void) {
+    if (g_job.running) return;
+    if (!try_autolocate_data_win()) return;
+    start_patch_thread(&g_job);
 }
 
 int main(int argc, char **argv) {
     char app_dir[PATH_LIMIT];
     get_executable_dir(app_dir, sizeof(app_dir), argc > 0 ? argv[0] : NULL);
     snprintf(g_job.app_dir, sizeof(g_job.app_dir), "%s", app_dir);
-    find_payload_dir(g_job.payload_dir, sizeof(g_job.payload_dir), app_dir);
     path_join(g_job.log_path, sizeof(g_job.log_path), app_dir, "patcher.log");
     set_job_status(&g_job, "Suelta carpeta o data.win");
 
@@ -1070,31 +1137,30 @@ int main(int argc, char **argv) {
     }
 
     if (argc > 1) select_input_path(argv[1]);
+    if (!g_job.data_win[0]) try_autolocate_data_win();
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(WINDOW_W, WINDOW_H, "DELTARUNE Chapter 5 ES Patcher");
     InitAudioDevice();
     SetTargetFPS(60);
 
-    char logo_path[PATH_LIMIT], music_path[PATH_LIMIT];
     Texture2D logo = {0};
     Music music = {0};
     int has_logo = 0, has_music = 0;
 
-    find_asset(app_dir, "logo.png", logo_path, sizeof(logo_path));
-    if (logo_path[0]) {
-        logo = LoadTexture(logo_path);
+    Image logo_image = LoadImageFromMemory(".png", embedded_logo_png, (int)embedded_logo_png_len);
+    if (logo_image.data != NULL) {
+        SetWindowIcon(logo_image);
+        logo = LoadTextureFromImage(logo_image);
         has_logo = logo.id != 0;
+        UnloadImage(logo_image);
     }
 
-    find_asset(app_dir, "music.wav", music_path, sizeof(music_path));
-    if (music_path[0]) {
-        music = LoadMusicStream(music_path);
-        if (music.stream.buffer != NULL) {
-            music.looping = true;
-            PlayMusicStream(music);
-            has_music = 1;
-        }
+    music = LoadMusicStreamFromMemory(".wav", embedded_music_wav, (int)embedded_music_wav_len);
+    if (music.stream.buffer != NULL) {
+        music.looping = true;
+        PlayMusicStream(music);
+        has_music = 1;
     }
 
     char log_text[LOG_LIMIT];
@@ -1105,12 +1171,15 @@ int main(int argc, char **argv) {
 
         if (IsFileDropped() && !g_job.running) {
             FilePathList dropped = LoadDroppedFiles();
-            if (dropped.count > 0) select_input_path(dropped.paths[0]);
+            if (dropped.count > 0) {
+                select_input_path(dropped.paths[0]);
+                if (g_job.data_win[0]) start_patch_or_locate();
+            }
             UnloadDroppedFiles(dropped);
         }
 
-        if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) && !g_job.running && g_job.data_win[0]) {
-            start_patch_thread(&g_job);
+        if ((IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) && !g_job.running) {
+            start_patch_or_locate();
         }
 
         read_log_tail(g_job.log_path, log_text, sizeof(log_text));
@@ -1135,7 +1204,7 @@ int main(int argc, char **argv) {
         }
 
         DrawLine(36, 174, w - 36, 174, WHITE);
-        DrawText("Suelta la carpeta del Capitulo 5 o data.win", 42, 194, 20, WHITE);
+        DrawText("Suelta la carpeta del Capitulo 5, data.win, o pon este exe junto al juego", 42, 194, 20, WHITE);
 
         char shown_path[180];
         abbreviate_path(g_job.data_win[0] ? g_job.data_win : "(ninguno)", shown_path, sizeof(shown_path), (size_t)((w - 84) / 9));
@@ -1146,9 +1215,9 @@ int main(int argc, char **argv) {
         DrawText(g_job.status, 42, 328, 22, g_job.success ? GREEN : WHITE);
 
         Rectangle patch_btn = {42, 372, 260, 54};
-        int disabled = g_job.running || !g_job.data_win[0];
+        int disabled = g_job.running;
         draw_button(patch_btn, g_job.running ? "PARCHEANDO..." : "APLICAR PARCHE", disabled);
-        if (button_clicked(patch_btn, disabled)) start_patch_thread(&g_job);
+        if (button_clicked(patch_btn, disabled)) start_patch_or_locate();
 
         DrawText("LOG", 54, 438, 18, WHITE);
         draw_log_text(log_text, (Rectangle){42, 454, (float)w - 84, (float)h - 492});
