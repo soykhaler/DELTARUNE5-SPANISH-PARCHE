@@ -25,8 +25,10 @@ Tambien puede usarse desde terminal:
 - `assets/music.wav`: musica en loop.
 - `payload/tables/ch5_es_strings_old.bin`: textos traducidos alineados con la build del 25 de junio de 2026.
 - `payload/tables/ch5_es_strings_new.bin`: textos traducidos alineados con la build del 27 de junio de 2026.
+- `payload/tables/ch5_es_strings_steam.bin`: textos traducidos alineados con la build de Steam del 29 de junio de 2026.
 - `payload/tables/ch5_es_dword_patches_old.bin`: offsets internos de la build del 25 de junio de 2026.
 - `payload/tables/ch5_es_dword_patches_new.bin`: offsets internos de la build del 27 de junio de 2026.
+- `payload/tables/ch5_es_dword_patches_steam.bin`: offsets internos de la build de Steam del 29 de junio de 2026.
 - `tools/make_payload_tables.py`: herramienta usada para regenerar las tablas desde el entorno de trabajo.
 
 El patcher reconstruye el bloque de textos `STRG` directamente y aplica la tabla de punteros que corresponde al layout detectado. No llama a `.sh`, `.bat`, `.exe`, `dotnet` ni `UndertaleModToolCli` durante el parcheo.

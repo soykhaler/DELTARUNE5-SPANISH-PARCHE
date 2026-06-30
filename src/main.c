@@ -32,6 +32,7 @@
 #define STRG_ALIGN 128
 #define KNOWN_INPUT_SHA256_OLD "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
 #define KNOWN_INPUT_SHA256_NEW "cd940118eff1a3f24dd8dca3932901f85bfc83761e175e36736622316e7ed556"
+#define KNOWN_INPUT_SHA256_STEAM "47c2c274bfb153b62d665f2343678751859f8d2417570768fca34352a57c65fe"
 
 typedef struct Sha256 {
     uint8_t data[64];
@@ -602,6 +603,7 @@ static const DwordPatchProfile *find_dword_profile(size_t strg_offset, uint32_t 
     static const DwordPatchProfile profiles[] = {
         {"2025-06-25", 0x014e8cf0u, 93214u, 0x0041ee08u, embedded_strings_old_bin, sizeof(embedded_strings_old_bin), embedded_dwords_old_bin, sizeof(embedded_dwords_old_bin)},
         {"2026-06-27", 0x014e9330u, 93223u, 0x0041ef48u, embedded_strings_new_bin, sizeof(embedded_strings_new_bin), embedded_dwords_new_bin, sizeof(embedded_dwords_new_bin)},
+        {"2026-06-29", 0x014e9560u, 93222u, 0x0041ef18u, embedded_strings_steam_bin, sizeof(embedded_strings_steam_bin), embedded_dwords_steam_bin, sizeof(embedded_dwords_steam_bin)},
     };
 
     for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i) {
@@ -874,7 +876,9 @@ static int patch_job_run(PatchJob *job) {
         append_log(job->log_path, "No se pudo calcular SHA256; continuo igualmente.\n");
     } else {
         append_log(job->log_path, "SHA256 entrada: %s\n", hash);
-        if (strcmp(hash, KNOWN_INPUT_SHA256_OLD) != 0 && strcmp(hash, KNOWN_INPUT_SHA256_NEW) != 0) {
+        if (strcmp(hash, KNOWN_INPUT_SHA256_OLD) != 0 &&
+            strcmp(hash, KNOWN_INPUT_SHA256_NEW) != 0 &&
+            strcmp(hash, KNOWN_INPUT_SHA256_STEAM) != 0) {
             append_log(job->log_path, "Aviso: hash no reconocido; intentare parchear solo si el layout esta soportado.\n");
         }
     }
