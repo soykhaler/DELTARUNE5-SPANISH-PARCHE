@@ -9,7 +9,7 @@ Uso:
 Tambien puedes copiar el ejecutable junto a data.win, abrirlo y pulsar APLICAR PARCHE.
 
 El programa crea data.win.original como copia de seguridad y sustituye data.win por la version parcheada.
-Soporta las builds de data.win probadas del 25, 27 y 29 de junio de 2026.
+Soporta las builds de data.win probadas del 25, 27 y 29 de junio de 2026, y 1 de julio de 2026.
 Si Toby Fox cambia el layout otra vez, el patcher avisara y no escribira punteros a ciegas.
 
 No incluye data.win ni archivos originales del juego.

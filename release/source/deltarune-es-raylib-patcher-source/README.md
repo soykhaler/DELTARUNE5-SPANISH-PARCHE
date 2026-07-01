@@ -21,17 +21,23 @@ Tambien puede usarse desde terminal:
 ## Que contiene
 
 - `src/main.c`: patcher raylib.
+- `src/embedded_assets.h`: declaraciones de assets embebidos.
 - `assets/logo.png`: logo mostrado en la ventana.
 - `assets/music.wav`: musica en loop.
 - `payload/tables/ch5_es_strings_old.bin`: textos traducidos alineados con la build del 25 de junio de 2026.
 - `payload/tables/ch5_es_strings_new.bin`: textos traducidos alineados con la build del 27 de junio de 2026.
 - `payload/tables/ch5_es_strings_steam.bin`: textos traducidos alineados con la build de Steam del 29 de junio de 2026.
+- `payload/tables/ch5_es_strings_20260701.bin`: textos traducidos alineados con la build de Steam del 1 de julio de 2026.
 - `payload/tables/ch5_es_dword_patches_old.bin`: offsets internos de la build del 25 de junio de 2026.
 - `payload/tables/ch5_es_dword_patches_new.bin`: offsets internos de la build del 27 de junio de 2026.
 - `payload/tables/ch5_es_dword_patches_steam.bin`: offsets internos de la build de Steam del 29 de junio de 2026.
+- `payload/tables/ch5_es_dword_patches_20260701.bin`: offsets internos de la build de Steam del 1 de julio de 2026.
+- `tools/embed_assets.py`: genera `src/embedded_assets.c` antes de compilar.
 - `tools/make_payload_tables.py`: herramienta usada para regenerar las tablas desde el entorno de trabajo.
 
 El patcher reconstruye el bloque de textos `STRG` directamente y aplica la tabla de punteros que corresponde al layout detectado. No llama a `.sh`, `.bat`, `.exe`, `dotnet` ni `UndertaleModToolCli` durante el parcheo.
+
+`src/embedded_assets.c` no se versiona porque es un archivo generado muy grande. Los scripts de build lo recrean desde `assets/` y `payload/tables/`; el ejecutable final sigue llevando todo embebido y no necesita payload externo.
 
 ## Build Linux
 

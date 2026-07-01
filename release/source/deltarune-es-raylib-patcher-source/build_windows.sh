@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$ROOT/build/windows"
+python3 "$ROOT/tools/embed_assets.py" --root "$ROOT"
 
 CROSS_CC="${CROSS_CC:-x86_64-w64-mingw32-gcc}"
 if ! command -v "$CROSS_CC" >/dev/null 2>&1; then
@@ -18,7 +19,7 @@ if [ ! -f "$RAYLIB_WIN_DIR/include/raylib.h" ] || [ ! -f "$RAYLIB_WIN_DIR/lib/li
 fi
 
 "$CROSS_CC" -std=c99 -O2 -Wall -Wextra -mwindows -static -static-libgcc \
-  "$ROOT/src/main.c" -o "$ROOT/build/windows/deltarune-es-patcher.exe" \
+  "$ROOT/src/main.c" "$ROOT/src/embedded_assets.c" -o "$ROOT/build/windows/deltarune-es-patcher.exe" \
   -I"$RAYLIB_WIN_DIR/include" -L"$RAYLIB_WIN_DIR/lib" \
   -lraylib -lopengl32 -lgdi32 -lwinmm -lshell32 -lole32 -luuid -lcomdlg32
 

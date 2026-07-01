@@ -7,3 +7,5 @@ data.win.*
 *.yydebug
 patcher.log
 *.log
+
+src/embedded_assets.c

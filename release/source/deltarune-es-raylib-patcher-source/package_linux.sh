@@ -20,6 +20,7 @@ cp "$ROOT/FINAL_README.txt" "$BIN_DIR/README.txt"
 chmod +x "$BIN_DIR/deltarune-es-patcher"
 
 cp -a "$ROOT/src" "$SRC_DIR/"
+rm -f "$SRC_DIR/src/embedded_assets.c"
 cp -a "$ROOT/assets" "$SRC_DIR/"
 mkdir -p "$SRC_DIR/payload"
 cp -a "$ROOT/payload/tables" "$SRC_DIR/payload/"
