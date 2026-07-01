@@ -54,6 +54,26 @@ Compila en Windows con raylib instalado o usa MinGW cross-compile si tienes rayl
 ./build_windows.sh
 ```
 
+## Regenerar tras una update de Steam
+
+En esta maquina, normalmente basta con:
+
+```bash
+./create_patch.sh
+```
+
+El script lee `chapter5_windows/data.win` desde Steam, remapea `translation_export_ch5/localized_text.humanfix.ascii.json`, usa tu UndertaleModTool local para crear una referencia, genera las tablas nuevas, actualiza `payload/profiles.json`, recompila Linux/Windows y recrea `final_linux.zip` y `final_windows.zip`.
+
+Si mueves carpetas, puedes usar:
+
+```bash
+DELTARUNE_WORK_ROOT=/ruta/a/undertalemodtool STEAM_DATA_WIN=/ruta/a/data.win ./create_patch.sh
+```
+
+No mete `data.win` ni UndertaleModTool en el parche final.
+
+Si `data.win` ya esta parcheado, el script aborta al principio. Para generar un perfil nuevo tras una update hace falta el `data.win` original que descarga Steam; si hace falta, verifica archivos desde Steam antes de ejecutar el script.
+
 ## Creditos
 
 No afiliado con Toby Fox, 8-4, Fangamer ni el equipo oficial.

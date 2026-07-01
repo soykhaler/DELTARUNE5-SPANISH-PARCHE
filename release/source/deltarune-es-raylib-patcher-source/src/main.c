@@ -30,10 +30,6 @@
 #define PATH_LIMIT 4096
 #define MAX_SEARCH_DEPTH 5
 #define STRG_ALIGN 128
-#define KNOWN_INPUT_SHA256_OLD "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e"
-#define KNOWN_INPUT_SHA256_NEW "cd940118eff1a3f24dd8dca3932901f85bfc83761e175e36736622316e7ed556"
-#define KNOWN_INPUT_SHA256_STEAM "47c2c274bfb153b62d665f2343678751859f8d2417570768fca34352a57c65fe"
-#define KNOWN_INPUT_SHA256_20260701 "de1f204ea4a9591c8f7d0355f59065db0261592a9faf5529f7d789df295fb1cc"
 
 typedef struct Sha256 {
     uint8_t data[64];
@@ -73,6 +69,8 @@ typedef struct PatchJob {
     char log_path[PATH_LIMIT];
     char status[256];
 } PatchJob;
+
+#include "embedded_profiles.h"
 
 static PatchJob g_job = {0};
 
@@ -601,20 +599,12 @@ static int find_chunk(const uint8_t *data, size_t len, const char name[4], size_
 }
 
 static const DwordPatchProfile *find_dword_profile(size_t strg_offset, uint32_t string_count, uint32_t strg_size) {
-    static DwordPatchProfile profiles[] = {
-        {"2025-06-25", 0x014e8cf0u, 93214u, 0x0041ee08u, embedded_strings_old_bin, 0, embedded_dwords_old_bin, 0},
-        {"2026-06-27", 0x014e9330u, 93223u, 0x0041ef48u, embedded_strings_new_bin, 0, embedded_dwords_new_bin, 0},
-        {"2026-06-29", 0x014e9560u, 93222u, 0x0041ef18u, embedded_strings_steam_bin, 0, embedded_dwords_steam_bin, 0},
-        {"2026-07-01", 0x014e9650u, 93223u, 0x0041eea8u, embedded_strings_20260701_bin, 0, embedded_dwords_20260701_bin, 0},
-    };
-    profiles[0].strings_blob_len = embedded_strings_old_bin_len;
-    profiles[0].blob_len = embedded_dwords_old_bin_len;
-    profiles[1].strings_blob_len = embedded_strings_new_bin_len;
-    profiles[1].blob_len = embedded_dwords_new_bin_len;
-    profiles[2].strings_blob_len = embedded_strings_steam_bin_len;
-    profiles[2].blob_len = embedded_dwords_steam_bin_len;
-    profiles[3].strings_blob_len = embedded_strings_20260701_bin_len;
-    profiles[3].blob_len = embedded_dwords_20260701_bin_len;
+    static DwordPatchProfile profiles[EMBEDDED_PROFILE_COUNT];
+    static int initialized = 0;
+    if (!initialized) {
+        init_embedded_profiles(profiles);
+        initialized = 1;
+    }
 
     for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i) {
         if (profiles[i].strg_offset == strg_offset &&
@@ -886,10 +876,7 @@ static int patch_job_run(PatchJob *job) {
         append_log(job->log_path, "No se pudo calcular SHA256; continuo igualmente.\n");
     } else {
         append_log(job->log_path, "SHA256 entrada: %s\n", hash);
-        if (strcmp(hash, KNOWN_INPUT_SHA256_OLD) != 0 &&
-            strcmp(hash, KNOWN_INPUT_SHA256_NEW) != 0 &&
-            strcmp(hash, KNOWN_INPUT_SHA256_STEAM) != 0 &&
-            strcmp(hash, KNOWN_INPUT_SHA256_20260701) != 0) {
+        if (!is_known_input_sha256(hash)) {
             append_log(job->log_path, "Aviso: hash no reconocido; intentare parchear solo si el layout esta soportado.\n");
         }
     }

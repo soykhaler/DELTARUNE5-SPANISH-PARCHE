@@ -1,0 +1,48 @@
+{
+  "profiles": [
+    {
+      "id": "old",
+      "name": "2025-06-25",
+      "input_sha256": "9ed07de5e437de3b7bac0000c6374166198ec337f5ad761de9d5fed393cf326e",
+      "output_sha256": "a24ed35ab060053d3363aa67c0afe1915d7ef0c61b219eb74d1a158d2206fb36",
+      "strg_offset": 21925104,
+      "string_count": 93214,
+      "strg_size": 4320776,
+      "strings": "payload/tables/ch5_es_strings_old.bin",
+      "dwords": "payload/tables/ch5_es_dword_patches_old.bin"
+    },
+    {
+      "id": "new",
+      "name": "2026-06-27",
+      "input_sha256": "cd940118eff1a3f24dd8dca3932901f85bfc83761e175e36736622316e7ed556",
+      "output_sha256": "f72a8d11eef48529de1e47319a1a465cd619430647a63b710a178c49bad63f7d",
+      "strg_offset": 21926704,
+      "string_count": 93223,
+      "strg_size": 4321096,
+      "strings": "payload/tables/ch5_es_strings_new.bin",
+      "dwords": "payload/tables/ch5_es_dword_patches_new.bin"
+    },
+    {
+      "id": "steam",
+      "name": "2026-06-29",
+      "input_sha256": "47c2c274bfb153b62d665f2343678751859f8d2417570768fca34352a57c65fe",
+      "output_sha256": "437fc8890a94289c0be446d6e06f2a821b121ec8ecf7eea44921c8b889f7ebfe",
+      "strg_offset": 21927264,
+      "string_count": 93222,
+      "strg_size": 4321048,
+      "strings": "payload/tables/ch5_es_strings_steam.bin",
+      "dwords": "payload/tables/ch5_es_dword_patches_steam.bin"
+    },
+    {
+      "id": "b20260701",
+      "name": "2026-07-01",
+      "input_sha256": "de1f204ea4a9591c8f7d0355f59065db0261592a9faf5529f7d789df295fb1cc",
+      "output_sha256": "3e52be596e9dce075e3a78ae3a37ddefa3061f0ccf7f420ef9d307979ae960d0",
+      "strg_offset": 21927504,
+      "string_count": 93223,
+      "strg_size": 4320936,
+      "strings": "payload/tables/ch5_es_strings_20260701.bin",
+      "dwords": "payload/tables/ch5_es_dword_patches_20260701.bin"
+    }
+  ]
+}

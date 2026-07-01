@@ -9,3 +9,6 @@ patcher.log
 *.log
 
 src/embedded_assets.c
+build/create_patch/
+*.ppdb
+__pycache__/
